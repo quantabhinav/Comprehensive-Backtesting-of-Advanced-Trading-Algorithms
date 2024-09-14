@@ -1,0 +1,149 @@
+
+!pip install pandas numpy matplotlib yfinance
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import yfinance as yf
+import warnings
+import contextlib
+import sys, os
+
+# Step 1: Download data function
+def download_data(ticker, start_date, end_date):
+    """
+    Download historical stock data from Yahoo Finance.
+
+    Parameters:
+    ticker (str): Ticker symbol, e.g., 'AAPL'
+    start_date (str): Start date in 'YYYY-MM-DD' format
+    end_date (str): End date in 'YYYY-MM-DD' format
+
+    Returns:
+    pd.DataFrame: Historical stock data.
+    """
+    data = yf.download(ticker, start=start_date, end=end_date)
+    data = data[['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']]  # Select relevant columns
+    return data
+
+# Step 2: Apply strategy function (placeholder for a custom strategy)
+def new_strategy(data):
+    """
+    Placeholder for applying a custom trading strategy.
+    For demonstration, adds a simple moving average crossover strategy.
+
+    Parameters:
+    data (pd.DataFrame): Historical stock data.
+
+    Returns:
+    pd.DataFrame: Updated data with strategy applied.
+    """
+    short_window = 40
+    long_window = 100
+    data['short_mavg'] = data['Close'].rolling(window=short_window).mean()
+    data['long_mavg'] = data['Close'].rolling(window=long_window).mean()
+    data['signal'] = np.where(data['short_mavg'] > data['long_mavg'], 1, 0)
+    data['positions'] = data['signal'].diff()
+    return data
+
+# Step 3: Backtest function
+def backtest(data, initial_capital):
+    """
+    Simulate a trading strategy and calculate portfolio performance over time.
+
+    Parameters:
+    data (pd.DataFrame): Historical stock data with strategy applied.
+    initial_capital (float): Initial capital for trading.
+
+    Returns:
+    pd.DataFrame: Portfolio performance metrics over time.
+    """
+    positions = pd.DataFrame(index=data.index).fillna(0.0)
+    positions['Stock'] = 0.0
+    portfolio = pd.DataFrame(index=data.index).fillna(0.0)
+
+    portfolio['cash'] = initial_capital
+    portfolio['holdings'] = positions.multiply(data['Close'], axis=0)
+    portfolio['total'] = portfolio['cash'] + portfolio['holdings']
+    portfolio['returns'] = portfolio['total'].pct_change()
+
+    for i in range(1, len(data)):
+        if data['positions'][i] == 1:
+            positions['Stock'][i] = initial_capital / data['Close'][i]
+            portfolio['cash'][i] = 0
+        elif data['positions'][i] == -1:
+            positions['Stock'][i] = 0
+            portfolio['cash'][i] = positions['Stock'][i-1] * data['Close'][i]
+        else:
+            positions['Stock'][i] = positions['Stock'][i-1]
+            portfolio['cash'][i] = portfolio['cash'][i-1]
+
+        portfolio['holdings'][i] = positions['Stock'][i] * data['Close'][i]
+        portfolio['total'][i] = portfolio['cash'][i] + portfolio['holdings'][i]
+        portfolio['returns'][i] = portfolio['total'][i] / portfolio['total'][i-1] - 1
+
+    return portfolio
+
+# Step 4: Suppress output context manager
+@contextlib.contextmanager
+def suppress_output():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        sys.stdout = devnull
+        sys.stderr = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+# Step 5: Generate report function
+def generate_report(portfolio, initial_capital):
+    """
+    Generate a report summarizing the portfolio performance.
+
+    Parameters:
+    portfolio (pd.DataFrame): Portfolio performance metrics over time.
+    initial_capital (float): Initial capital used for trading.
+    """
+    # Plot portfolio value over time
+    plt.figure(figsize=(12, 6))
+    plt.plot(portfolio['total'], label='Portfolio value')
+    plt.title('Portfolio value over time')
+    plt.xlabel('Date')
+    plt.ylabel('Portfolio value')
+    plt.legend()
+    plt.show()
+
+    # Calculate additional metrics
+    total_return = (portfolio['total'][-1] / initial_capital - 1) * 100
+    annualized_return = ((1 + portfolio['returns'].mean()) ** 252 - 1) * 100
+    annualized_volatility = portfolio['returns'].std() * np.sqrt(252) * 100
+    sharpe_ratio = (annualized_return - 0.01) / annualized_volatility  # Assuming risk-free rate of 1%
+
+    # Display additional metrics
+    print(f"Total Return: {total_return:.2f}%")
+    print(f"Annualized Return: {annualized_return:.2f}%")
+    print(f"Annualized Volatility: {annualized_volatility:.2f}%")
+    print(f"Sharpe Ratio: {sharpe_ratio:.2f}")
+
+# Main script
+if __name__ == "__main__":
+    ticker = 'AAPL'
+    start_date = '2021-01-01'
+    end_date = '2024-01-01'
+    initial_capital = 100000.0
+
+    # Step 1: Download data
+    data = download_data(ticker, start_date, end_date)
+
+    # Step 2: Apply a strategy and suppress output
+    with suppress_output():
+        data = new_strategy(data)
+
+    # Step 3: Backtest and suppress output
+    with suppress_output():
+        portfolio = backtest(data, initial_capital)
+
+    # Step 4: Generate report
+    generate_report(portfolio, initial_capital)
